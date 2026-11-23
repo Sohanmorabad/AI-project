@@ -2,7 +2,7 @@ import streamlit as st
 
 from common import sidebar_filters
 
-st.set_page_config(page_title="Smart Energy Monitor", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Energy Monitoring – 2026 Simulation", page_icon="⚡", layout="wide")
 
 pages = [
     st.Page("views/overview.py", title="Overview", icon="📊", default=True),

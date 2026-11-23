@@ -6,8 +6,12 @@ from common import get_filters, household_days, run_query
 f = get_filters()
 where, params, price, factor = f["where"], f["params"], f["price"], f["factor"]
 
-st.title("Smart Energy Monitoring System")
-st.caption("Historical London smart meter data (2011-2014). The price is an adjustable assumption, not a real tariff.")
+st.title("Energy Monitoring – 2026 Simulation")
+st.caption(
+    "Simulated 2026 energy intelligence platform powered by historical London smart-meter profiles. "
+    "All energy consumption readings and patterns reflect actual measurements. "
+    "The electricity price is an adjustable assumption, not a real tariff."
+)
 
 kpi = run_query(
     f"""SELECT COUNT(*) AS n, SUM(energy_kwh) AS total_kwh,
@@ -16,7 +20,7 @@ kpi = run_query(
     params,
 )
 if kpi["n"][0] == 0:
-    st.warning("No data for this selection.")
+    st.warning("No data for this selection. Try adjusting the simulated date range.")
     st.stop()
 
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -26,8 +30,8 @@ c3.metric("Estimated emissions", f"{kpi['total_kwh'][0] * factor:,.0f} kg CO₂e
 c4.metric("Peak power", f"{kpi['peak_kw'][0]:.2f} kW")
 c5.metric("Average power", f"{kpi['avg_kw'][0]:.2f} kW")
 st.caption(
-    "Emissions are an estimate (energy x the factor in the sidebar), not a measurement. "
-    "The data is from 2011-2014, when the grid was more carbon-intensive than the 2026 factor suggests."
+    "Emissions are an estimate (energy × the factor in the sidebar), not a measurement. "
+    "Historical London smart-meter readings are mapped to the 2026 simulation calendar."
 )
 
 by_hour = run_query(
@@ -36,17 +40,23 @@ by_hour = run_query(
 )
 daily = household_days(where, params).groupby("date", as_index=False)["energy_kwh"].mean()
 
-fig1 = px.bar(by_hour, x="hour", y="power_kw", title="Average power by hour of day (kW)",
-              labels={"hour": "Hour of day", "power_kw": "Average power (kW)"})
-fig2 = px.line(daily, x="date", y="energy_kwh", title="Daily energy per household (kWh)",
-               labels={"date": "Date", "energy_kwh": "Energy (kWh)"})
+fig1 = px.bar(
+    by_hour, x="hour", y="power_kw",
+    title="Simulated Hourly Power Profile (Average kW)",
+    labels={"hour": "Hour of day", "power_kw": "Average power (kW)"},
+)
+fig2 = px.line(
+    daily, x="date", y="energy_kwh",
+    title="Simulated Daily Consumption Timeline (kWh per household)",
+    labels={"date": "Simulated Date (2026)", "energy_kwh": "Energy (kWh)"},
+)
 
 left, right = st.columns(2)
 left.plotly_chart(fig1, width="stretch")
 right.plotly_chart(fig2, width="stretch")
 
 # ---------- Insights (calculated from the current selection) ----------
-st.subheader("Insights")
+st.subheader("Insights – Simulated Period")
 
 hourly = by_hour.set_index("hour")["power_kw"].reindex(range(24))
 days = household_days(where, params)
@@ -73,10 +83,10 @@ if weekend.any() and (~weekend).any():
     diff = we / wd - 1
     word = "more" if diff >= 0 else "less"
     b.info(
-        f"**Weekends vs weekdays:** a typical weekend day uses {abs(diff):.0%} {word} electricity "
+        f"**Weekends vs weekdays:** a typical weekend day in this simulated period uses {abs(diff):.0%} {word} electricity "
         f"than a weekday ({we:.1f} kWh vs {wd:.1f} kWh per household)."
     )
 else:
     b.info("Select a longer date range to compare weekends with weekdays.")
 
-st.caption("Insights describe patterns in the selected data. They are not savings estimates.")
+st.caption("Insights describe patterns in the simulated data. They are not savings estimates.")

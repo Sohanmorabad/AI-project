@@ -10,18 +10,21 @@ import streamlit as st
 from common import run_query
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "src"))
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
+
 from live_alerts import flag_unusual  # noqa: E402
+from simulation import to_simulated_dataframe, to_simulated_timestamp  # noqa: E402
 
 LIVE_DB = ROOT / "data" / "live.db"
 REFRESH_SECONDS = 5
 
-# Demo scenarios: the same three days for two households (the second has an unusual evening spike)
+# Demo scenarios: three days for two households mapped to the 2026 simulation calendar
 SCENARIOS = {
-    "Typical household (MAC000002, 13-15 Sep 2013)": ("MAC000002", "2013-09-13", 3),
-    "Household with an unusual evening (MAC003428, 13-15 Sep 2013)": ("MAC003428", "2013-09-13", 3),
+    "Typical household (2026 simulation)": ("MAC000002", "2013-09-13", 3),
+    "Household with unusual evening (2026 simulation)": ("MAC003428", "2013-09-13", 3),
 }
-DEMO_START = 24          # readings already showing when a demo starts (12 hours)
+DEMO_START = 24  # readings already showing when a demo starts (12 hours)
 
 
 def read_live(sql, params=()):
@@ -40,15 +43,19 @@ def read_live(sql, params=()):
 
 def show_readings(df, device, n, demo=False):
     """Banner, numbers and chart for one device. `df` holds readings oldest to newest."""
+    # Ensure historical readings are mapped to the 2026 simulation calendar
+    if not df.empty and pd.api.types.is_datetime64_any_dtype(df["timestamp"]) and (df["timestamp"].dt.year < 2020).any():
+        df = to_simulated_dataframe(df, timestamp_cols=["timestamp"])
+
     df = flag_unusual(df)
     shown = df.tail(n)
     latest = df.iloc[-1]
 
     if latest["source"] == "replay":
-        where = "inside this app" if demo else "through the live pipeline"
         st.warning(
-            f"**REPLAY.** These are historical household readings from 2011-2014, replayed {where}. "
-            "They are not live measurements."
+            "💡 **2026 Simulation Active**\n\n"
+            "Historical smart-meter readings are mapped to a 2026 simulated calendar. "
+            "Real consumption values and ML models are preserved."
         )
     else:
         st.success("**LIVE DEVICE.** These readings come from a real device.")
@@ -57,23 +64,36 @@ def show_readings(df, device, n, demo=False):
     a, b, c, d = st.columns(4)
     a.metric("Latest reading", f"{latest['power_kw']:.3f} kW",
              delta=None if previous is None else f"{latest['power_kw'] - previous:+.3f} kW")
-    b.metric("Reading time", latest["timestamp"].strftime("%d %b %Y %H:%M"))
+
+    # Display reading time using centralized 2026 simulation transformation
+    reading_time = latest["timestamp"]
+    if hasattr(reading_time, "year") and reading_time.year < 2020:
+        reading_time = to_simulated_timestamp(reading_time)
+    elif isinstance(reading_time, str) and int(str(reading_time)[:4]) < 2020:
+        reading_time = to_simulated_timestamp(reading_time)
+    if isinstance(reading_time, str):
+        reading_time = pd.to_datetime(reading_time)
+
+    b.metric("Reading time (2026)", reading_time.strftime("%d %b %Y %H:%M"))
     c.metric("Average shown", f"{shown['power_kw'].mean():.3f} kW")
     d.metric("Unusual readings shown", int(shown["is_unusual"].sum()))
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=shown["timestamp"], y=shown["power_kw"], mode="lines", name="Power"))
+    fig.add_trace(go.Scatter(x=shown["timestamp"], y=shown["power_kw"], mode="lines", name="Power (kW)"))
     fig.add_trace(go.Scatter(x=shown["timestamp"], y=shown["upper_limit"], mode="lines", name="Usual upper limit",
                              line=dict(dash="dot", width=1)))
     odd = shown[shown["is_unusual"]]
     fig.add_trace(go.Scatter(x=odd["timestamp"], y=odd["power_kw"], mode="markers", name="Unusual",
                              marker=dict(size=10, color="#e76f51")))
-    fig.update_layout(title=f"{device}: power over the last {len(shown)} readings",
-                      xaxis_title="Time", yaxis_title="Power (kW)", legend_title_text="")
+    fig.update_layout(title=f"{device}: power over the last {len(shown)} readings (2026 Simulation)",
+                      xaxis_title="Simulated Time (2026)", yaxis_title="Power (kW)", legend_title_text="")
     st.plotly_chart(fig, width="stretch")
 
     if demo:
-        st.caption("Demo: readings are replayed inside this app from the historical dataset.")
+        st.caption(
+            "2026 simulation: original historical consumption values are displayed "
+            "on a shifted 2026 timeline. No actual 2026 meter readings are used."
+        )
     else:
         received = datetime.strptime(latest["received_at"], "%Y-%m-%d %H:%M:%S")
         st.caption(f"Last data received by the API at {received:%H:%M:%S}. "
@@ -98,9 +118,13 @@ def live_panel():
     df = read_live(
         """SELECT source, device_id, timestamp, power_kw, received_at FROM live_readings
            WHERE device_id = ? ORDER BY timestamp DESC LIMIT ?""",
-        (device, n + 48),                        # 48 extra so the unusual-reading rule has history
+        (device, n + 48),  # 48 extra so the unusual-reading rule has history
     )
     df["timestamp"] = pd.to_datetime(df["timestamp"])
+    # Shift historical timestamps to simulated 2026 timeline via centralized simulation module.
+    # Original database and consumption values remain unchanged.
+    if not df.empty and (df["timestamp"].dt.year < 2020).any():
+        df = to_simulated_dataframe(df, timestamp_cols=["timestamp"])
     show_readings(df.sort_values("timestamp"), device, n)
     with st.expander("Latest readings"):
         st.dataframe(df.head(10)[["timestamp", "device_id", "power_kw", "source", "received_at"]],
@@ -121,6 +145,11 @@ def demo_panel():
         st.warning("No data found for this scenario.")
         return
     data["timestamp"] = pd.to_datetime(data["timestamp"])
+
+    # Shift historical 2013 timestamps to a simulated 2026 timeline via centralized simulation module.
+    # Original database and consumption values remain unchanged.
+    data = to_simulated_dataframe(data, timestamp_cols=["timestamp"])
+
     data["source"] = "replay"
     data["device_id"] = household
 
@@ -149,7 +178,7 @@ def demo_panel():
             st.session_state["demo_pos"] = min(st.session_state["demo_pos"] + speed, len(data))
         pos = st.session_state["demo_pos"]
         show_readings(data.iloc[:pos].copy(), household, 96, demo=True)
-        st.progress(pos / len(data), text=f"{pos} of {len(data)} readings replayed")
+        st.progress(pos / len(data), text=f"{pos} of {len(data)} readings replayed (2026 Simulation)")
         if st.session_state["demo_playing"] and pos >= len(data):
             st.session_state["demo_playing"] = False
             st.rerun(scope="app")
@@ -158,14 +187,14 @@ def demo_panel():
 
 
 # ---------------- Page ----------------
-st.title("Live monitoring")
+st.title("Live Monitoring – 2026 Simulation")
 
 has_live = bool(len(read_live("SELECT 1 FROM live_readings LIMIT 1")))
 if has_live:
     mode = st.radio("Source", ["Local live feed", "Demo replay"], horizontal=True)
 else:
     mode = "Demo replay"
-    st.info("There is no local live feed on this site, so this page runs a **replay** of historical readings "
+    st.info("There is no local live feed on this site, so this page runs a **2026 simulated replay** of historical readings "
             "inside the app.")
 
 if mode == "Local live feed":

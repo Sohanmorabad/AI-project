@@ -1,19 +1,33 @@
 import pandas as pd
 import streamlit as st
 
-from common import get_filters, run_query
+from common import get_filters, run_query, to_historical_month, to_simulated_month
 
 f = get_filters()
 household, price, factor = f["household"], f["price"], f["factor"]
-st.title("Monthly report")
+st.title("Monthly Energy Report – 2026 Simulation")
+st.caption(
+    "Monthly energy consumption and cost summary mapped to the 2026 simulation timeline. "
+    "All calculations and aggregation logic preserve original meter measurements."
+)
 
-months = run_query(
+raw_months = run_query(
     "SELECT DISTINCT substr(date, 1, 7) AS month FROM energy_readings WHERE date >= '2012-10-01' ORDER BY month"
 )["month"].tolist()
-month = st.selectbox("Month", months, index=max(len(months) - 2, 0))
+
+# Map historical months to simulated 2026 months
+month_map = {to_simulated_month(m): m for m in raw_months}
+all_sim_months = sorted(list(month_map.keys()))
+
+# Default to 2026 simulation calendar months
+sim_months_2026 = [m for m in all_sim_months if m.startswith("2026")]
+available_months = sim_months_2026 if sim_months_2026 else all_sim_months
+
+month = st.selectbox("Simulated Month", available_months, index=max(len(available_months) - 4, 0))
 
 
-def month_stats(m):
+def month_stats(sim_m):
+    hist_m = month_map.get(sim_m, to_historical_month(sim_m))
     sql = """
         SELECT COUNT(*) AS household_days, SUM(day_kwh) AS total_kwh,
                AVG(day_kwh) AS avg_day_kwh, MAX(peak_kw) AS peak_kw
@@ -21,7 +35,7 @@ def month_stats(m):
             SELECT household_id, date, SUM(energy_kwh) AS day_kwh, MAX(power_kw) AS peak_kw
             FROM energy_readings
             WHERE substr(date, 1, 7) = ?"""
-    p = [m]
+    p = [hist_m]
     if household != "All households":
         sql += " AND household_id = ?"
         p.append(household)
@@ -34,10 +48,10 @@ def month_stats(m):
 
 cur = month_stats(month)
 prev_month = (pd.Period(month) - 1).strftime("%Y-%m")
-prev = month_stats(prev_month) if prev_month in months else None
+prev = month_stats(prev_month) if prev_month in all_sim_months else None
 
 if cur["household_days"] == 0:
-    st.info("No full days of data for this month and household.")
+    st.info("No full days of data for this simulated month and household.")
 else:
     total_kwh = cur["total_kwh"]
     change = None
@@ -57,24 +71,24 @@ else:
 
     report = pd.DataFrame({
         "Metric": [
-            "Month", "Household", "Total energy (kWh)", "Estimated cost (GBP)",
+            "Simulated Reporting Period", "Household", "Total energy (kWh)", "Estimated cost (GBP)",
             "Estimated emissions (kg CO2e)", "Average per household per day (kWh)",
             "Peak power (kW)", "Change vs previous month (%)",
         ],
         "Value": [
-            month, household, f"{total_kwh:.1f}", f"{total_kwh * price:.2f}",
+            f"{month} (2026 Simulation)", household, f"{total_kwh:.1f}", f"{total_kwh * price:.2f}",
             f"{total_kwh * factor:.1f}", f"{cur['avg_day_kwh']:.2f}", f"{cur['peak_kw']:.2f}",
             "n/a" if change is None else f"{change:.1f}",
         ],
     })
     st.dataframe(report, width="stretch", hide_index=True)
     st.download_button(
-        "Download report (CSV)",
+        "Download simulated report (CSV)",
         report.to_csv(index=False),
-        file_name=f"energy_report_{month}.csv",
+        file_name=f"simulated_energy_report_{month}.csv",
         mime="text/csv",
     )
     st.caption(
-        "Full days only (48 readings). Uses the price and emissions factor from the sidebar and ignores the date filter. "
+        "Full days only (48 half-hour readings). Uses the price and emissions factor from the sidebar. "
         "The comparison uses per-household averages because the number of reporting households varies."
     )

@@ -7,7 +7,7 @@ from common import get_filters, run_query
 f = get_filters()
 where, params = f["where"], f["params"]
 
-st.title("Tariff what-if")
+st.title("Tariff What-If – 2026 Simulation")
 st.caption(
     "Compare a flat price with a time-of-use tariff (cheap at some hours, expensive at others) using the "
     "household and dates selected in the sidebar. All prices here are illustrative placeholders, not real tariffs."
@@ -19,7 +19,7 @@ by_hour = run_query(
     params,
 )
 if by_hour.empty or by_hour["readings"].sum() == 0:
-    st.warning("No data for this selection.")
+    st.warning("No data for this selection. Try adjusting the simulated date range.")
     st.stop()
 
 # ---------- Controls ----------
@@ -35,6 +35,7 @@ peak_price = c2.number_input("Peak price (£ per kWh)", min_value=0.0, value=0.3
 std_price = c3.number_input("Price at all other hours (£ per kWh)", min_value=0.0, value=0.25, step=0.01)
 c3.caption("Hours are 'from' up to but not including 'to'. If the two windows overlap, peak wins.")
 
+
 # ---------- Calculation ----------
 def band(h):
     if peak_hours[0] <= h < peak_hours[1]:
@@ -47,7 +48,7 @@ def band(h):
 by_hour["band"] = by_hour["hour"].map(band)
 by_hour["price"] = by_hour["band"].map({"Peak": peak_price, "Cheap": cheap_price, "Standard": std_price})
 
-household_days = by_hour["readings"].sum() / 48          # one household-day = 48 half-hour readings
+household_days = by_hour["readings"].sum() / 48  # one household-day = 48 half-hour readings
 total_kwh = by_hour["kwh"].sum()
 peak_kwh = by_hour.loc[by_hour["band"] == "Peak", "kwh"].sum()
 has_cheap = by_hour["band"].eq("Cheap").any()
@@ -89,6 +90,6 @@ fig = px.bar(
 st.plotly_chart(fig, width="stretch")
 
 st.caption(
-    "This is a simple what-if on historical 2011-2014 usage. It assumes usage stays the same unless you move some "
-    "peak usage with the slider, and real households may behave differently. Tariff prices are placeholders."
+    "This is a what-if simulation on historical smart-meter usage mapped to the 2026 calendar. "
+    "It assumes usage stays the same unless shifted with the slider. Real households may behave differently. Tariff prices are placeholders."
 )

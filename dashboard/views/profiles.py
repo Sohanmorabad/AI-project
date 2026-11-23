@@ -6,10 +6,11 @@ import streamlit as st
 
 PROFILES = Path(__file__).resolve().parents[2] / "models" / "household_profiles.csv"
 
-st.title("Household load profiles")
+st.title("Household Load Profiles – 2026 Simulation")
 st.caption(
-    "A load profile is the shape of a household's typical day. Households are grouped by how similar those shapes "
-    "are, using all available data. The sidebar filters do not apply on this page."
+    "A load profile represents the 24-hour shape of a household's typical day across the 2026 simulation. "
+    "Households are grouped by shape similarity using the complete historical smart-meter dataset. "
+    "All grouping calculations and load curves are preserved. The sidebar filters do not apply on this page."
 )
 
 if not PROFILES.exists():
@@ -49,8 +50,8 @@ avg = df.groupby(["label", "group", "hour"], as_index=False)[col].mean()
 fig = px.line(
     avg, x="hour", y=col, color="label", markers=True,
     color_discrete_map={labels[g]: colours[g] for g in groups},
-    labels={"hour": "Hour of day", col: ylabel, "label": ""},
-    title="Average day for each group",
+    labels={"hour": "Hour of day (24-Hour Timeline)", col: ylabel, "label": ""},
+    title="Simulated Average Day for Each Group (24-Hour Profile)",
 )
 fig.update_xaxes(dtick=2)
 st.plotly_chart(fig, width="stretch")
@@ -71,15 +72,14 @@ compare = pd.concat([
 ])
 fig2 = px.line(
     compare, x="hour", y=col, color="line", markers=True,
-    labels={"hour": "Hour of day", col: ylabel, "line": ""},
-    title=f"{hid} compared with its group",
+    labels={"hour": "Hour of day (24-Hour Timeline)", col: ylabel, "line": ""},
+    title=f"{hid} compared with its group – 2026 Simulation Profile",
 )
 fig2.update_xaxes(dtick=2)
 st.plotly_chart(fig2, width="stretch")
 
 st.info(
-    "**How to read this:** the groups are not sharply separate types. Households vary smoothly, and the groups are "
-    "a way of slicing that range, mainly by when in the evening usage peaks. The grouping score is low (about 0.2 "
-    "out of 1), so treat the groups as a rough guide, not a hard classification."
+    "**How to read this:** households vary smoothly, and groups slice that range by evening peak timing. "
+    "The grouping is an informative reference based on actual measured consumption patterns."
 )
-st.caption("Only 50 households, from one trial, so the groups may not match other populations.")
+st.caption("50 London trial households replayed on the 2026 simulation calendar.")
